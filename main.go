@@ -5,8 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"strconv"
 	"strings"
+
+	"math/big"
 
 	_ "github.com/lib/pq"
 )
@@ -14,11 +15,11 @@ import (
 type SendCheck struct {
 	Address      string
 	ID           string
-	Send         int64
-	Recv         int64
-	SendFee      int64
-	StartBalance int64
-	EndBalance   int64
+	Send         string
+	Recv         string
+	SendFee      string
+	StartBalance string
+	EndBalance   string
 	Ok           bool
 }
 
@@ -34,8 +35,13 @@ func parseAddressMapping(mapping string) map[string]string {
 	return result
 }
 
-func parseBalance(balance string) (int64, error) {
-	return strconv.ParseInt(balance, 10, 64)
+func parseBalance(balance string) (*big.Int, error) {
+	n := new(big.Int)
+	_, ok := n.SetString(balance, 10)
+	if !ok {
+		return nil, fmt.Errorf("无法解析余额: %s", balance)
+	}
+	return n, nil
 }
 
 func getBalanceAtHeight(db *sql.DB, id string, height int64) (string, error) {
@@ -50,6 +56,42 @@ func getBalanceAtHeight(db *sql.DB, id string, height int64) (string, error) {
 		}
 	}
 	return "", sql.ErrNoRows
+}
+
+func (sc *SendCheck) calculateBalance() error {
+	send, ok := new(big.Int).SetString(sc.Send, 10)
+	if !ok {
+		return fmt.Errorf("无法解析发送金额: %s", sc.Send)
+	}
+
+	recv, ok := new(big.Int).SetString(sc.Recv, 10)
+	if !ok {
+		return fmt.Errorf("无法解析接收金额: %s", sc.Recv)
+	}
+
+	sendFee, ok := new(big.Int).SetString(sc.SendFee, 10)
+	if !ok {
+		return fmt.Errorf("无法解析手续费: %s", sc.SendFee)
+	}
+
+	startBalance, ok := new(big.Int).SetString(sc.StartBalance, 10)
+	if !ok {
+		return fmt.Errorf("无法解析起始余额: %s", sc.StartBalance)
+	}
+
+	endBalance, ok := new(big.Int).SetString(sc.EndBalance, 10)
+	if !ok {
+		return fmt.Errorf("无法解析结束余额: %s", sc.EndBalance)
+	}
+
+	expected := new(big.Int)
+	expected.Set(startBalance)
+	expected.Sub(expected, send)
+	expected.Add(expected, recv)
+	expected.Sub(expected, sendFee)
+
+	sc.Ok = expected.Cmp(endBalance) == 0
+	return nil
 }
 
 func main() {
@@ -89,21 +131,21 @@ func main() {
 			ID:      id,
 		}
 
-		querySend := `SELECT COALESCE(SUM(value), 0) FROM messages WHERE method=0 AND "from"=$1 AND height>=$2 AND height<=$3`
+		querySend := `SELECT COALESCE(SUM(value)::text, '0') FROM messages WHERE method=0 AND "from"=$1 AND height>=$2 AND height<=$3`
 		err := db.QueryRow(querySend, addr, *startHeight, *endHeight).Scan(&sc.Send)
 		if err != nil {
 			log.Printf("查询地址发送 %s (ID: %s) 失败: %v", addr, id, err)
 			continue
 		}
 
-		queryRecv := `SELECT COALESCE(SUM(value), 0) FROM messages WHERE method=0 AND "to"=$1 AND height>=$2 AND height<=$3`
+		queryRecv := `SELECT COALESCE(SUM(value)::text, '0') FROM messages WHERE method=0 AND "to"=$1 AND height>=$2 AND height<=$3`
 		err = db.QueryRow(queryRecv, addr, *startHeight, *endHeight).Scan(&sc.Recv)
 		if err != nil {
 			log.Printf("查询地址接收 %s (ID: %s) 失败: %v", addr, id, err)
 			continue
 		}
 
-		querySendFee := `SELECT COALESCE(SUM(base_fee_burn + over_estimation_burn + miner_tip), 0) FROM derived_gas_outputs WHERE method=0 AND "from"=$1 AND height>=$2 AND height<=$3`
+		querySendFee := `SELECT COALESCE(SUM(base_fee_burn + over_estimation_burn + miner_tip)::text, '0') FROM derived_gas_outputs WHERE method=0 AND "from"=$1 AND height>=$2 AND height<=$3`
 		err = db.QueryRow(querySendFee, addr, *startHeight, *endHeight).Scan(&sc.SendFee)
 		if err != nil {
 			log.Printf("查询地址发送手续费 %s (ID: %s) 失败: %v", addr, id, err)
@@ -115,24 +157,19 @@ func main() {
 			log.Printf("查询地址开始余额 %s (ID: %s) 失败: %v", addr, id, err)
 			continue
 		}
-		sc.StartBalance, err = parseBalance(startBalanceStr)
-		if err != nil {
-			log.Printf("解析开始余额失败 %s (ID: %s): %v", addr, id, err)
-			continue
-		}
+		sc.StartBalance = startBalanceStr
 
 		endBalanceStr, err := getBalanceAtHeight(db, id, *endHeight)
 		if err != nil {
 			log.Printf("查询地址结束余额 %s (ID: %s) 失败: %v", addr, id, err)
 			continue
 		}
-		sc.EndBalance, err = parseBalance(endBalanceStr)
-		if err != nil {
-			log.Printf("解析结束余额失败 %s (ID: %s): %v", addr, id, err)
+		sc.EndBalance = endBalanceStr
+
+		if err := sc.calculateBalance(); err != nil {
+			log.Printf("计算余额失败 %s (ID: %s): %v", addr, id, err)
 			continue
 		}
-
-		sc.Ok = sc.EndBalance == sc.StartBalance-sc.Send+sc.Recv-sc.SendFee
 
 		sendChecks = append(sendChecks, sc)
 	}
