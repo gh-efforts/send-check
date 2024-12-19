@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -20,7 +21,7 @@ type SendCheck struct {
 	SendFee      string
 	StartBalance string
 	EndBalance   string
-	Ok           bool
+	Result       string
 }
 
 func parseAddressMapping(mapping string) map[string]string {
@@ -35,20 +36,12 @@ func parseAddressMapping(mapping string) map[string]string {
 	return result
 }
 
-func parseBalance(balance string) (*big.Int, error) {
-	n := new(big.Int)
-	_, ok := n.SetString(balance, 10)
-	if !ok {
-		return nil, fmt.Errorf("无法解析余额: %s", balance)
-	}
-	return n, nil
-}
-
 func getBalanceAtHeight(db *sql.DB, id string, height int64) (string, error) {
 	for h := height; h >= 0; h-- {
 		var balance string
 		err := db.QueryRow(`SELECT balance FROM actors WHERE id=$1 AND height=$2`, id, h).Scan(&balance)
 		if err == nil {
+			fmt.Printf("getBalanceAtHeight %s %d %s\n", id, h, balance)
 			return balance, nil
 		}
 		if err != sql.ErrNoRows {
@@ -90,7 +83,8 @@ func (sc *SendCheck) calculateBalance() error {
 	expected.Add(expected, recv)
 	expected.Sub(expected, sendFee)
 
-	sc.Ok = expected.Cmp(endBalance) == 0
+	sc.Result = expected.Sub(expected, endBalance).String()
+
 	return nil
 }
 
@@ -174,5 +168,9 @@ func main() {
 		sendChecks = append(sendChecks, sc)
 	}
 
-	fmt.Println(sendChecks)
+	json, err := json.MarshalIndent(sendChecks, "", "  ")
+	if err != nil {
+		log.Fatalf("无法序列化结果: %v", err)
+	}
+	fmt.Println(string(json))
 }
