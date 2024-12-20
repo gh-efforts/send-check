@@ -19,6 +19,8 @@ type SendCheck struct {
 	Send         string
 	Recv         string
 	SendFee      string
+	VmSend       string
+	VmRecv       string
 	StartBalance string
 	EndBalance   string
 	Result       string
@@ -61,6 +63,16 @@ func (sc *SendCheck) calculateBalance() error {
 		return fmt.Errorf("无法解析接收金额: %s", sc.Recv)
 	}
 
+	vmSend, ok := new(big.Int).SetString(sc.VmSend, 10)
+	if !ok {
+		return fmt.Errorf("无法解析 VM 发送金额: %s", sc.VmSend)
+	}
+
+	vmRecv, ok := new(big.Int).SetString(sc.VmRecv, 10)
+	if !ok {
+		return fmt.Errorf("无法解析 VM 接收金额: %s", sc.VmRecv)
+	}
+
 	sendFee, ok := new(big.Int).SetString(sc.SendFee, 10)
 	if !ok {
 		return fmt.Errorf("无法解析手续费: %s", sc.SendFee)
@@ -78,8 +90,13 @@ func (sc *SendCheck) calculateBalance() error {
 
 	expected := new(big.Int)
 	expected.Set(startBalance)
-	expected.Sub(expected, send)
-	expected.Add(expected, recv)
+
+	totalSend := new(big.Int).Add(send, vmSend)
+	expected.Sub(expected, totalSend)
+
+	totalRecv := new(big.Int).Add(recv, vmRecv)
+	expected.Add(expected, totalRecv)
+
 	expected.Sub(expected, sendFee)
 
 	sc.Result = expected.Sub(expected, endBalance).String()
@@ -94,6 +111,7 @@ func main() {
 	dbURL := flag.String("url", "", "数据库 URL (格式: postgres://user:password@host:port/dbname?sslmode=disable)")
 	startHeight := flag.Int64("start", 0, "起始高度")
 	endHeight := flag.Int64("end", 0, "结束高度")
+	skipVm := flag.Bool("skip-vm", false, "跳过 vm_messages 表的查询")
 
 	flag.Parse()
 
@@ -143,6 +161,25 @@ func main() {
 		if err != nil {
 			log.Printf("查询地址发送手续费 %s (ID: %s) 失败: %v", addr, id, err)
 			continue
+		}
+
+		if !*skipVm {
+			queryVmSend := `SELECT COALESCE(SUM(value)::text, '0') FROM vm_messages WHERE "from"=$1 AND height>=$2 AND height<=$3`
+			err = db.QueryRow(queryVmSend, addr, *startHeight, *endHeight).Scan(&sc.VmSend)
+			if err != nil {
+				log.Printf("查询 vm_messages 地址发送 %s (ID: %s) 失败: %v", addr, id, err)
+				continue
+			}
+
+			queryVmRecv := `SELECT COALESCE(SUM(value)::text, '0') FROM vm_messages WHERE "to"=$1 AND height>=$2 AND height<=$3`
+			err = db.QueryRow(queryVmRecv, addr, *startHeight, *endHeight).Scan(&sc.VmRecv)
+			if err != nil {
+				log.Printf("查询 vm_messages 地址接收 %s (ID: %s) 失败: %v", addr, id, err)
+				continue
+			}
+		} else {
+			sc.VmSend = "0"
+			sc.VmRecv = "0"
 		}
 
 		startBalanceStr, err := getBalanceAtHeight(db, id, *startHeight)
