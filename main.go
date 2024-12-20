@@ -41,7 +41,6 @@ func getBalanceAtHeight(db *sql.DB, id string, height int64) (string, error) {
 		var balance string
 		err := db.QueryRow(`SELECT balance FROM actors WHERE id=$1 AND height=$2`, id, h).Scan(&balance)
 		if err == nil {
-			fmt.Printf("getBalanceAtHeight %s %d %s\n", id, h, balance)
 			return balance, nil
 		}
 		if err != sql.ErrNoRows {
@@ -125,21 +124,21 @@ func main() {
 			ID:      id,
 		}
 
-		querySend := `SELECT COALESCE(SUM(value)::text, '0') FROM messages WHERE method=0 AND "from"=$1 AND height>=$2 AND height<=$3`
+		querySend := `SELECT COALESCE(SUM(value)::text, '0') FROM messages WHERE "from"=$1 AND height>=$2 AND height<=$3`
 		err := db.QueryRow(querySend, addr, *startHeight, *endHeight).Scan(&sc.Send)
 		if err != nil {
 			log.Printf("查询地址发送 %s (ID: %s) 失败: %v", addr, id, err)
 			continue
 		}
 
-		queryRecv := `SELECT COALESCE(SUM(value)::text, '0') FROM messages WHERE method=0 AND "to"=$1 AND height>=$2 AND height<=$3`
+		queryRecv := `SELECT COALESCE(SUM(value)::text, '0') FROM messages WHERE "to"=$1 AND height>=$2 AND height<=$3`
 		err = db.QueryRow(queryRecv, addr, *startHeight, *endHeight).Scan(&sc.Recv)
 		if err != nil {
 			log.Printf("查询地址接收 %s (ID: %s) 失败: %v", addr, id, err)
 			continue
 		}
 
-		querySendFee := `SELECT COALESCE(SUM(base_fee_burn + over_estimation_burn + miner_tip)::text, '0') FROM derived_gas_outputs WHERE method=0 AND "from"=$1 AND height>=$2 AND height<=$3`
+		querySendFee := `SELECT COALESCE(SUM(base_fee_burn + over_estimation_burn + miner_tip)::text, '0') FROM derived_gas_outputs WHERE "from"=$1 AND height>=$2 AND height<=$3`
 		err = db.QueryRow(querySendFee, addr, *startHeight, *endHeight).Scan(&sc.SendFee)
 		if err != nil {
 			log.Printf("查询地址发送手续费 %s (ID: %s) 失败: %v", addr, id, err)
