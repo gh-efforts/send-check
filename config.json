@@ -1,0 +1,9 @@
+{
+  "db": "postgres://user:password@host:port/dbname?sslmode=disable",
+  "address": {
+    "f1khdd2v7il7lxn4zjzzrqwceh466mq5k333ktu7q": "f01906216",
+    "f1m2swr32yrlouzs7ijui3jttwgc6lxa5n5sookhi": "f086971",
+    "f1ys5qqiciehcml3sp764ymbbytfn3qoar5fo3iwy": "f047684"
+  },
+  "skip_vm": false
+} 
