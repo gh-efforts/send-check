@@ -115,7 +115,9 @@ func (sc *SendCheck) calculateBalance() error {
 
 	expected.Sub(expected, sendFee)
 
-	sc.Result = expected.Sub(expected, endBalance).String()
+	difference := new(big.Int).Sub(expected, endBalance)
+	difference.Abs(difference)
+	sc.Result = difference.String()
 
 	return nil
 }

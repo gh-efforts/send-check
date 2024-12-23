@@ -1,81 +1,87 @@
 # send-check
 
-一个用于检查 Filecoin 指定账户交易余额对账的工具。
+一个自动化的 Filecoin 链上交易对账工具，支持定时任务和 Prometheus 指标监控。用来确认lily数据库中是否缺数据。
 
 ## 功能特点
 
-- 支持指定区块高度范围进行对账
-- 自动计算账户的发送、接收、手续费等交易数据
-- 验证账户余额变动是否准确
-- 输出 JSON 格式的对账结果
+- 自动计算前一天的区块高度范围进行对账
+- 支持多账户批量对账
+- 提供 Prometheus 指标监控
+- 定时任务支持（默认每天凌晨 2 点执行）
+- 可选是否包含 VM 消息交易统计
 
-## 使用方法
+## 配置说明
 
-```bash
-./send-check -end <结束区块高度> -start <起始区块高度> -url <数据库连接地址>
-```
+需要在程序同目录下创建 `config.json` 配置文件：
 
-参数说明:
-- `-start`: 起始区块高度
-- `-end`: 结束区块高度  
-- `-url`: PostgreSQL 数据库连接地址
-- `-address`: 地址映射，格式为'address1:id1,address2:id2'
-- `-skip-vm`: 跳过 vm_messages 表的查询
-
-## 输出说明
-
-程序会输出 JSON 格式的对账结果,包含以下字段:
-
-- `Address`: 账户地址
-- `ID`: 账户 ID
-- `Send`: 发送金额(attoFIL)
-- `Recv`: 接收金额(attoFIL) 
-- `SendFee`: 发送交易产生的手续费
-- `VmSend`: VM 发送金额(attoFIL)
-- `VmRecv`: VM 接收金额(attoFIL)
-- `StartBalance`: 起始余额
-- `EndBalance`: 结束余额
-- `Result`: 对账结果(0表示账目平衡)
-
-对账计算公式:
-```
-Result = StartBalance - SendFee - Send - VmSend + Recv + VmRecv - EndBalance
-```
-当 Result = 0 时表示账目完全平衡。
-
-## 示例
-```bash
-root@lily-5-prod:~/send-check# ./send-check -end 4545100 -start 4545000 -skip-vm -url 'postgres'
-[
-  {
-    "Address": "f1khdd2v7il7lxn4zjzzrqwceh466mq5k333ktu7q",
-    "ID": "f01906216",
-    "Send": "25150715184380000000000",
-    "Recv": "21979951475781584299238",
-    "SendFee": "34801249385521",
-    "StartBalance": "3331153890278300306726070",
-    "EndBalance": "3327983126534900641639787",
-    "Result": "0"
+```json
+{
+  "db": "postgresql://user:password@localhost:5432/dbname",
+  "address": {
+    "f1xxx...": "f01234",
+    "f1yyy...": "f05678"
   },
-  {
-    "Address": "f1m2swr32yrlouzs7ijui3jttwgc6lxa5n5sookhi",
-    "ID": "f086971",
-    "Send": "0",
-    "Recv": "0",
-    "SendFee": "0",
-    "StartBalance": "117273712634807362343707731",
-    "EndBalance": "117273712634807362343707731",
-    "Result": "0"
-  },
-  {
-    "Address": "f1ys5qqiciehcml3sp764ymbbytfn3qoar5fo3iwy",
-    "ID": "f047684",
-    "Send": "10673644304940000000000",
-    "Recv": "236639274523400000000",
-    "SendFee": "466484652384156",
-    "StartBalance": "79801511390836445981203596",
-    "EndBalance": "79791074385339544728819440",
-    "Result": "0"
-  }
-]
+  "skip_vm": false
+}
 ```
+
+配置项说明：
+- `db`: PostgreSQL 数据库连接串
+- `address`: Filecoin 地址与 ID 的映射关系
+- `skip_vm`: 是否跳过 VM 消息统计（可选，默认 false）
+
+## 对账结果说明
+
+程序会输出 JSON 格式的对账结果，包含以下字段：
+
+| 字段 | 说明 |
+|------|------|
+| `Address` | Filecoin 账户地址 |
+| `ID` | 账户 ID |
+| `Send` | 发送金额 (attoFIL) |
+| `Recv` | 接收金额 (attoFIL) |
+| `SendFee` | 发送交易手续费 |
+| `VmSend` | VM 发送金额 (attoFIL) |
+| `VmRecv` | VM 接收金额 (attoFIL) |
+| `StartBalance` | 起始余额 |
+| `EndBalance` | 结束余额 |
+| `Result` | 对账结果 (0 表示平衡) |
+
+### 对账计算公式
+
+```
+Result = StartBalance - SendFee - (Send + VmSend) + (Recv + VmRecv) - EndBalance
+```
+
+## Prometheus 指标
+
+程序在 `:2112/metrics` 端点提供以下指标：
+
+- `filecoin_balance_check_result{address="xxx"}`: 各地址的对账结果
+
+## 数据库查询说明
+
+程序会查询以下数据表：
+- `messages`: 链上交易消息
+- `vm_messages`: VM 消息（可选）
+- `actors`: 账户余额信息
+- `derived_gas_outputs`: 手续费信息
+
+## 时间设置
+
+- 程序使用北京时间（Asia/Shanghai）
+- 自动计算前一天（0:00-23:59:59）的区块高度
+- 定时任务在每天凌晨 2 点执行
+
+## 运行说明
+
+1. 准备配置文件 `config.json`
+2. 运行程序：
+```bash
+./send-check
+```
+
+程序启动后会：
+1. 立即执行一次对账检查
+2. 设置每天凌晨 2 点的定时任务
+3. 启动 Prometheus 指标服务器（端口 2112）
