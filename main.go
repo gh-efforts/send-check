@@ -169,27 +169,34 @@ func runCheck(config *Config) {
 	sendChecks := make([]SendCheck, 0, len(config.Address))
 	for addr, id := range config.Address {
 		sc := SendCheck{
-			Address: addr,
-			ID:      id,
+			Address:      addr,
+			ID:           id,
+			Send:         "0",
+			Recv:         "0",
+			SendFee:      "0",
+			VmSend:       "0",
+			VmRecv:       "0",
+			StartBalance: "0",
+			EndBalance:   "0",
 		}
 
 		querySend := `SELECT COALESCE(SUM(value)::text, '0') FROM messages WHERE "from"=$1 AND height>=$2 AND height<=$3`
 		err := db.QueryRow(querySend, addr, config.StartHeight, config.EndHeight).Scan(&sc.Send)
-		if err != nil {
+		if err != nil && err != sql.ErrNoRows {
 			log.Printf("查询地址发送 %s (ID: %s) 失败: %v", addr, id, err)
 			continue
 		}
 
 		queryRecv := `SELECT COALESCE(SUM(value)::text, '0') FROM messages WHERE "to"=$1 AND height>=$2 AND height<=$3`
 		err = db.QueryRow(queryRecv, addr, config.StartHeight, config.EndHeight).Scan(&sc.Recv)
-		if err != nil {
+		if err != nil && err != sql.ErrNoRows {
 			log.Printf("查询地址接收 %s (ID: %s) 失败: %v", addr, id, err)
 			continue
 		}
 
 		querySendFee := `SELECT COALESCE(SUM(base_fee_burn + over_estimation_burn + miner_tip)::text, '0') FROM derived_gas_outputs WHERE "from"=$1 AND height>=$2 AND height<=$3`
 		err = db.QueryRow(querySendFee, addr, config.StartHeight, config.EndHeight).Scan(&sc.SendFee)
-		if err != nil {
+		if err != nil && err != sql.ErrNoRows {
 			log.Printf("查询地址发送手续费 %s (ID: %s) 失败: %v", addr, id, err)
 			continue
 		}
@@ -197,14 +204,14 @@ func runCheck(config *Config) {
 		if !config.SkipVM {
 			queryVmSend := `SELECT COALESCE(SUM(value)::text, '0') FROM vm_messages WHERE "from"=$1 AND height>=$2 AND height<=$3`
 			err = db.QueryRow(queryVmSend, addr, config.StartHeight, config.EndHeight).Scan(&sc.VmSend)
-			if err != nil {
+			if err != nil && err != sql.ErrNoRows {
 				log.Printf("查询 vm_messages 地址发送 %s (ID: %s) 失败: %v", addr, id, err)
 				continue
 			}
 
 			queryVmRecv := `SELECT COALESCE(SUM(value)::text, '0') FROM vm_messages WHERE "to"=$1 AND height>=$2 AND height<=$3`
 			err = db.QueryRow(queryVmRecv, addr, config.StartHeight, config.EndHeight).Scan(&sc.VmRecv)
-			if err != nil {
+			if err != nil && err != sql.ErrNoRows {
 				log.Printf("查询 vm_messages 地址接收 %s (ID: %s) 失败: %v", addr, id, err)
 				continue
 			}
@@ -214,7 +221,7 @@ func runCheck(config *Config) {
 		}
 
 		startBalanceStr, err := getBalanceAtHeight(db, id, config.StartHeight)
-		if err != nil {
+		if err != nil && err != sql.ErrNoRows {
 			log.Printf("查询地址开始余额 %s (ID: %s) 失败: %v", addr, id, err)
 			continue
 		}
@@ -222,7 +229,7 @@ func runCheck(config *Config) {
 		sc.StartBalance = startBalanceStr
 
 		endBalanceStr, err := getBalanceAtHeight(db, id, config.EndHeight)
-		if err != nil {
+		if err != nil && err != sql.ErrNoRows {
 			log.Printf("查询地址结束余额 %s (ID: %s) 失败: %v", addr, id, err)
 			continue
 		}
