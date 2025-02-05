@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -180,14 +181,22 @@ func runCheck(config *Config) {
 			EndBalance:   "0",
 		}
 
-		querySend := `SELECT COALESCE(SUM(value)::text, '0') FROM messages WHERE "from"=$1 AND height>=$2 AND height<=$3`
+		querySend := `
+			SELECT COALESCE(SUM(m.value)::text, '0') 
+			FROM messages m
+			JOIN receipts r ON m.cid = r.message 
+			WHERE m."from"=$1 AND m.height>=$2 AND m.height<=$3 AND r.exit_code=0`
 		err := db.QueryRow(querySend, addr, config.StartHeight, config.EndHeight).Scan(&sc.Send)
 		if err != nil && err != sql.ErrNoRows {
 			log.Printf("查询地址发送 %s (ID: %s) 失败: %v", addr, id, err)
 			continue
 		}
 
-		queryRecv := `SELECT COALESCE(SUM(value)::text, '0') FROM messages WHERE "to"=$1 AND height>=$2 AND height<=$3`
+		queryRecv := `
+			SELECT COALESCE(SUM(m.value)::text, '0') 
+			FROM messages m
+			JOIN receipts r ON m.cid = r.message 
+			WHERE m."to"=$1 AND m.height>=$2 AND m.height<=$3 AND r.exit_code=0`
 		err = db.QueryRow(queryRecv, addr, config.StartHeight, config.EndHeight).Scan(&sc.Recv)
 		if err != nil && err != sql.ErrNoRows {
 			log.Printf("查询地址接收 %s (ID: %s) 失败: %v", addr, id, err)
@@ -255,6 +264,10 @@ func runCheck(config *Config) {
 }
 
 func main() {
+	// 添加命令行参数
+	configFile := flag.String("config", "config.json", "配置文件路径")
+	flag.Parse()
+
 	// 设置为北京时区
 	location, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
@@ -267,7 +280,7 @@ func main() {
 	checkTask := func() {
 		log.Printf("开始执行余额检查任务: %s", time.Now().Format("2006-01-02 15:04:05"))
 
-		config, err := loadConfig("config.json")
+		config, err := loadConfig(*configFile)
 		if err != nil {
 			log.Printf("加载配置失败: %v", err)
 			return
