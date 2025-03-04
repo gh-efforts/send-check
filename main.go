@@ -238,7 +238,7 @@ func runCheck(config *Config) {
 
 		sc.StartBalance = startBalanceStr
 
-		endBalanceStr, err := getBalanceAtHeight(db, id, config.EndHeight)
+		endBalanceStr, err := getBalanceAtHeight(db, id, config.EndHeight+1)
 		if err != nil && err != sql.ErrNoRows {
 			log.Printf("查询地址结束余额 %s (ID: %s) 失败: %v", addr, id, err)
 			continue
