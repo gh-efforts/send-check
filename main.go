@@ -60,6 +60,7 @@ func getBalanceAtHeight(db *sql.DB, id string, height int64) (string, error) {
 		var balance string
 		err := db.QueryRow(`SELECT balance FROM actors WHERE id=$1 AND height=$2`, id, h).Scan(&balance)
 		if err == nil {
+			log.Printf("查询地址 %s 高度 %d 余额: %s\n", id, h, balance)
 			return balance, nil
 		}
 		if err != sql.ErrNoRows {
@@ -266,12 +267,31 @@ func runCheck(config *Config) {
 func main() {
 	// 添加命令行参数
 	configFile := flag.String("config", "config.json", "配置文件路径")
+	manualStart := flag.Int64("start", 0, "手动执行时的起始高度")
+	manualEnd := flag.Int64("end", 0, "手动执行时的结束高度")
+	manualMode := flag.Bool("manual", false, "是否为手动执行模式")
 	flag.Parse()
 
 	// 设置为北京时区
 	location, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
 		log.Fatalf("加载时区失败: %v", err)
+	}
+
+	if *manualMode {
+		if *manualStart == 0 || *manualEnd == 0 {
+			log.Fatal("手动模式下必须指定起始和结束高度")
+		}
+		config, err := loadConfig(*configFile)
+		if err != nil {
+			log.Fatalf("加载配置失败: %v", err)
+		}
+		// 覆盖配置文件中的高度设置
+		config.StartHeight = *manualStart
+		config.EndHeight = *manualEnd
+		log.Printf("开始手动执行检查，起始高度：%d，结束高度：%d", *manualStart, *manualEnd)
+		runCheck(config)
+		return
 	}
 
 	c := cron.New(cron.WithLocation(location))
